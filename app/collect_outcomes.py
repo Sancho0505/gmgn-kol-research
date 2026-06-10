@@ -1,7 +1,12 @@
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 
 from app.db import get_conn
 from app.gmgn_client import token_info
+
+
+def now_utc():
+    return datetime.now(timezone.utc)
 
 
 def to_decimal(value):
@@ -23,7 +28,7 @@ def extract_price(data):
     return to_decimal(price)
 
 
-def get_eligible_tokens(limit=50):
+def get_eligible_tokens(limit=100):
     with get_conn() as conn:
         return conn.execute(
             """
@@ -53,20 +58,13 @@ def get_eligible_tokens(limit=50):
 
 
 def upsert_24h(token_id, base_price, current_price):
-    if base_price is None or current_price is None or base_price == 0:
-        return False
-
     roi = (current_price / base_price) - Decimal("1")
 
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO token_outcomes (
-                token_id,
-                base_price_usd,
-                price_24h,
-                roi_24h,
-                winner_24h
+                token_id, base_price_usd, price_24h, roi_24h, winner_24h
             )
             VALUES (%s,%s,%s,%s,%s)
             ON CONFLICT (token_id)
@@ -76,33 +74,18 @@ def upsert_24h(token_id, base_price, current_price):
                 roi_24h = EXCLUDED.roi_24h,
                 winner_24h = EXCLUDED.winner_24h
             """,
-            (
-                token_id,
-                base_price,
-                current_price,
-                roi,
-                roi >= Decimal("3"),
-            ),
+            (token_id, base_price, current_price, roi, roi >= Decimal("3")),
         )
-    return True
 
 
 def upsert_72h(token_id, base_price, current_price):
-    if base_price is None or current_price is None or base_price == 0:
-        return False
-
     roi = (current_price / base_price) - Decimal("1")
 
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO token_outcomes (
-                token_id,
-                base_price_usd,
-                price_72h,
-                roi_72h,
-                winner_72h,
-                completed_at
+                token_id, base_price_usd, price_72h, roi_72h, winner_72h, completed_at
             )
             VALUES (%s,%s,%s,%s,%s,NOW())
             ON CONFLICT (token_id)
@@ -113,53 +96,53 @@ def upsert_72h(token_id, base_price, current_price):
                 winner_72h = EXCLUDED.winner_72h,
                 completed_at = NOW()
             """,
-            (
-                token_id,
-                base_price,
-                current_price,
-                roi,
-                roi >= Decimal("5"),
-            ),
+            (token_id, base_price, current_price, roi, roi >= Decimal("5")),
         )
-    return True
 
 
 def main():
-    tokens = get_eligible_tokens(limit=50)
+    current_time = now_utc()
+    tokens = get_eligible_tokens(limit=100)
 
     saved_24h = 0
     saved_72h = 0
-    skipped = 0
+    skipped_not_ready = 0
+    skipped_no_price = 0
 
     for token in tokens:
         base_price = to_decimal(token["base_price_usd"])
-
-        try:
-            data = token_info(token["token_address"])
-        except Exception as e:
-            print(f"ERROR token_info {token['symbol']}: {e}")
-            skipped += 1
+        if base_price is None or base_price == 0:
+            skipped_no_price += 1
             continue
 
+        age = current_time - token["discovered_at"]
+
+        need_24h = token["price_24h"] is None and age >= timedelta(hours=24)
+        need_72h = token["price_72h"] is None and age >= timedelta(hours=72)
+
+        if not need_24h and not need_72h:
+            skipped_not_ready += 1
+            continue
+
+        data = token_info(token["token_address"])
         current_price = extract_price(data)
 
         if current_price is None:
-            skipped += 1
+            skipped_no_price += 1
             continue
 
-        # Dev/test mode: fills both fields immediately.
-        # Later we will gate this by discovered_at + 24h / +72h.
-        if token["price_24h"] is None:
-            if upsert_24h(token["id"], base_price, current_price):
-                saved_24h += 1
+        if need_24h:
+            upsert_24h(token["id"], base_price, current_price)
+            saved_24h += 1
 
-        if token["price_72h"] is None:
-            if upsert_72h(token["id"], base_price, current_price):
-                saved_72h += 1
+        if need_72h:
+            upsert_72h(token["id"], base_price, current_price)
+            saved_72h += 1
 
     print(f"saved_24h={saved_24h}")
     print(f"saved_72h={saved_72h}")
-    print(f"skipped={skipped}")
+    print(f"skipped_not_ready={skipped_not_ready}")
+    print(f"skipped_no_price={skipped_no_price}")
 
 
 if __name__ == "__main__":
