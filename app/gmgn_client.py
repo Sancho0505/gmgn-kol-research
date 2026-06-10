@@ -78,3 +78,25 @@ def token_traders_by_tag(address, tag, limit=20):
     )
 
     return json.loads(result.stdout)
+
+
+def token_info(address):
+    cmd = [
+        "gmgn-cli",
+        "token",
+        "info",
+        "--chain",
+        "sol",
+        "--address",
+        address,
+        "--raw",
+    ]
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    return json.loads(result.stdout)
