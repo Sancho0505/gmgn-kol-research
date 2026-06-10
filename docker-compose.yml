@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: gmgn_kol_postgres
+    environment:
+      POSTGRES_DB: gmgn_research
+      POSTGRES_USER: gmgn
+      POSTGRES_PASSWORD: gmgn_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - gmgn_pgdata:/var/lib/postgresql/data
+
+volumes:
+  gmgn_pgdata:
