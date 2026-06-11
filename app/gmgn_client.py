@@ -100,3 +100,31 @@ def token_info(address):
     )
 
     return json.loads(result.stdout)
+
+
+def trenches(token_type="completed", limit=80):
+    cmd = [
+        "gmgn-cli",
+        "market",
+        "trenches",
+        "--chain",
+        "sol",
+        "--type",
+        token_type,
+        "--limit",
+        str(limit),
+        "--sort-by",
+        "created_timestamp",
+        "--direction",
+        "desc",
+        "--raw",
+    ]
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    return json.loads(result.stdout)
