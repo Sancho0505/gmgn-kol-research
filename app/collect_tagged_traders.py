@@ -13,13 +13,41 @@ TAGS_TO_COLLECT = [
 ]
 
 
-def get_recent_tokens(limit=20):
+def get_tokens_for_tagged_traders(limit=20):
     with get_conn() as conn:
         return conn.execute(
             """
-            SELECT id, token_address, symbol
-            FROM tokens
-            ORDER BY id DESC
+            SELECT
+                t.id,
+                t.token_address,
+                t.symbol,
+                COUNT(tt.id) FILTER (
+                    WHERE tt.is_smart_wallet = true
+                       OR tt.is_renowned = true
+                       OR tt.is_sniper = true
+                       OR tt.is_bundler = true
+                       OR tt.is_rat_trader = true
+                       OR tt.is_fresh_wallet = true
+                ) AS tagged_rows,
+                MAX(tt.observed_at) AS last_tagged_at
+            FROM tokens t
+            LEFT JOIN token_traders tt ON tt.token_id = t.id
+            WHERE t.discovered_at >= NOW() - INTERVAL '12 hours'
+            GROUP BY t.id, t.token_address, t.symbol
+            HAVING
+                COUNT(tt.id) FILTER (
+                    WHERE tt.is_smart_wallet = true
+                       OR tt.is_renowned = true
+                       OR tt.is_sniper = true
+                       OR tt.is_bundler = true
+                       OR tt.is_rat_trader = true
+                       OR tt.is_fresh_wallet = true
+                ) = 0
+                OR MAX(tt.observed_at) < NOW() - INTERVAL '30 minutes'
+            ORDER BY
+                tagged_rows ASC,
+                MAX(tt.observed_at) NULLS FIRST,
+                t.discovered_at DESC
             LIMIT %s
             """,
             (limit,),
@@ -37,7 +65,7 @@ def extract_items(data):
 
 
 def main():
-    tokens = get_recent_tokens(limit=20)
+    tokens = get_tokens_for_tagged_traders(limit=20)
     total_saved = 0
 
     for token in tokens:
