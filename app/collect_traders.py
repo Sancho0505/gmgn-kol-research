@@ -122,13 +122,27 @@ def save_trader(token_id, rank, item):
         return True
 
 
-def get_recent_tokens(limit=20):
+def get_tokens_for_traders(limit=80):
     with get_conn() as conn:
         return conn.execute(
             """
-            SELECT id, token_address, symbol
-            FROM tokens
-            ORDER BY id DESC
+            SELECT
+                t.id,
+                t.token_address,
+                t.symbol,
+                COUNT(tt.id) AS trader_rows,
+                MAX(tt.observed_at) AS last_trader_at
+            FROM tokens t
+            LEFT JOIN token_traders tt ON tt.token_id = t.id
+            WHERE t.discovered_at >= NOW() - INTERVAL '12 hours'
+            GROUP BY t.id, t.token_address, t.symbol
+            HAVING
+                COUNT(tt.id) = 0
+                OR MAX(tt.observed_at) < NOW() - INTERVAL '30 minutes'
+            ORDER BY
+                COUNT(tt.id) ASC,
+                MAX(tt.observed_at) NULLS FIRST,
+                t.discovered_at DESC
             LIMIT %s
             """,
             (limit,),
@@ -136,14 +150,18 @@ def get_recent_tokens(limit=20):
 
 
 def main():
-    tokens = get_recent_tokens(limit=20)
+    tokens = get_tokens_for_traders(limit=80)
 
     total_saved = 0
 
     for token in tokens:
         print(f"collecting traders: {token['symbol']} {token['token_address']}")
 
-        data = token_traders(token["token_address"], limit=20)
+        try:
+            data = token_traders(token["token_address"], limit=20)
+        except Exception as e:
+            print(f"ERROR traders {token['symbol']}: {e}")
+            continue
 
         items = (
             data.get("data", {}).get("list")
