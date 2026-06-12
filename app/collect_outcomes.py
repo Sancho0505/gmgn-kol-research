@@ -28,7 +28,7 @@ def extract_price(data):
     return to_decimal(price)
 
 
-def get_eligible_tokens(limit=100):
+def get_eligible_tokens(limit=300):
     with get_conn() as conn:
         return conn.execute(
             """
@@ -45,12 +45,22 @@ def get_eligible_tokens(limit=100):
                 SELECT price_usd
                 FROM token_snapshots
                 WHERE token_id = t.id
+                  AND price_usd IS NOT NULL
                 ORDER BY snapshot_at ASC
                 LIMIT 1
             ) ts ON true
             LEFT JOIN token_outcomes o ON o.token_id = t.id
-            WHERE ts.price_usd IS NOT NULL
-            ORDER BY t.id DESC
+            WHERE
+                (
+                    t.discovered_at <= NOW() - INTERVAL '24 hours'
+                    AND (o.price_24h IS NULL)
+                )
+                OR
+                (
+                    t.discovered_at <= NOW() - INTERVAL '72 hours'
+                    AND (o.price_72h IS NULL)
+                )
+            ORDER BY t.discovered_at ASC
             LIMIT %s
             """,
             (limit,),
